@@ -59,6 +59,11 @@ pub fn build(b: *std.Build) void {
     // don't need and to put everything under a single module.
     const exe = b.addExecutable(.{
         .name = "leaf",
+        .version = .{
+            .major = 1,
+            .minor = 0,
+            .patch = 2,
+        },
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -83,6 +88,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.export_table = true;
+    // exe.dll_export_fns = true; // YEAH!!!!!!
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden

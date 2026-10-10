@@ -1,213 +1,312 @@
 //
 // CoffeeLake(c) 2026-*
-// 
-// @machine: atvlg
-// @creator: atolstopyatov20178@vk.com
-// 
+// LEAF Object Format - rev 1.0.2
+//
+//!
+//! Expecting file layout
+//! ```text
+//! ┌───────────────────────┐ ┐
+//! │ FILE header section │ │ Resident header
+//! │ LOAD header section │ │ (loads with app image)
+//! ├───────────────────────┤ ┘
+//! │ LINK header section │ Non-resident header
+//! │ metadata table      │ (will ignored by loader)
+//! ├───────────────────────┤
+//! │   SECTION TABLE     │ 
+//! │ RELOCACTION BLOCKS  │ 
+//! ├───────────────────────┤
+//! │ 00 01 FF 4D D6 90 20│ File Section bytes
+//! │ 33 00 00 03 00 04 FF│ 
+//! │ 56 09 DA F0 0B CC 3C│
+//! ├───────────────────────┤  
+//! │ 03 00 05 DD 0A 5F 4D│ File section bytes
+//! ├───────────────────────┤
+//! │  .export section    │ Defines by special characteristics
+//! ├───────────────────────┤ and markers inside
+//! |  .import section    │ 
+//! ├───────────────────────┤
+//! ├───────────────────────┤
+//! │ ???                 │ Under construction
+//! └───────────────────────┘
+//! ```
+//! 
+//! The `_offset` postfix fields are file offset values
+//! The `_ptr` postfix fields are virtual offsets what depend on the `LOAD::base`
+//! 
+/// Platform-independent part of the LEAF header is a FILE_HEADER.
+/// Lives at the beginning of file.
+pub const File = extern struct {
+    magic: u32,           // 4
+    cpu: CPUArchitecture, // 2
+    cpu_word: CPUWordSize,// 1  32 or 64 defines the following loader section
+    module: ModuleType,   // 1
+    flags: ModuleFlags,   // 4
+    strings_offset: u32,  // 4 where the strings table begins
+    strings_size: u32,    // 4 size of the strings table
+    link_offset: u32,     // 4 offset to the LINK section. 
+    pub const MAGIC_LE: u32 = 0x4C454146;
+    pub const MAGIC_BE: u32 = 0x4641454C;
+
+    pub const LEAF_VERSION: Version = .{
+        .major = 1, 
+        .minor = 0, 
+        .revision = 2, 
+        .build = 0,
+    };
+
+    pub fn testMagic(m: u32) bool {
+        return m == MAGIC_BE or m == MAGIC_LE;
+    }
+    pub fn testOfmtVersion(m: Version) bool {
+        return Version.eql(m, LEAF_VERSION);
+    }
+};
 ///
-/// `_load` section is a definitely start of every executable/loadable image
-/// This is a minimal image payload which loader needs to resolve at the runtime 
+/// Registered/supported machine word sizes
 /// 
-/// Every `_offset` field tells that entity location is a raw file offset.
-/// Every `_ptr` field tells that offset is a relative and depends on image `base`
+pub const CPUWordSize = enum(u8) {
+    _32 = 0x20,
+    _64 = 0x40,
+};
+
+/// Image behaviour flags. Orthogonal to Module kind.
+pub const ModuleFlags = packed struct(u32) {
+    /// Code is position-independent Ignore the relocation table.
+    /// Loader may place image at any base without touching it.
+    no_relocs: bool = false,
+    /// Image has a valid relocation table and can be rebased.
+    pie_capable: bool = false,
+    /// Image must be loaded at `Load.base`. Overrides ASLR.
+    fixed_base: bool = false,
+    /// Kernel-mode image: ring0-only features, no user-mode system calls
+    mode: bool = false,
+    /// Image carries a valid signature section (required by HVCI-style checks)
+    signed: bool = false,
+    /// Image carries debug info in a section marked `Kind.Debug`
+    debug_info: bool = false,
+    _reserved: u26 = 0,
+};
+
+/// Variant of the loader block, selected by File.cpu_word.
+pub const Load = packed union {
+    _32: Load32,
+    _64: Load64,
+};
 /// 
-/// __This rule uses everywhere same with Hungarian notation `a` and `p` prefixes__
-///
-pub const Load = packed struct {
-    magic: u32, // place ASCII bytes as a default integer
-    cpu: Architecture, // 16
-    /// Maximum machine word available. Depending on it, the relocation table size
-    /// and export/import addresses are declared. 
-    /// No more magic tricks with image characteristics!
-    cpu_word: u8, // 8
-    module: Module, // u8
-    base: u32,
+/// Directly by the file section the Loader section is following.
+/// if `cpu_word=0x20` in the File section
+/// 
+pub const Load32 = extern struct {
+    base: u32,             // image location 
+    size: u32,             // image size
+    entry_ptr: u32,
     sections_offset: u32,
     sections_count: u32,
     relocs_offset: u32,
     relocs_count: u32,
-    entry_ptr: u32,
-    
-    pub const MAGIC_LE: u32 = 0x4C454146;
-    pub const MAGIC_BE: u32 = 0x4641454C;
-    pub const LEAF_VERSION: Version = .{
-        .major = 1,
-        .minor = 0,
-        .revision = 1,
-        .build = 16 // zig??
-    };
-    
-    pub fn test_magic(m: u32) bool {
-        return m == MAGIC_BE or m == MAGIC_LE;
-    }
-    pub fn test_ofmt(m: Version) bool {
-        return Version.eql(m, LEAF_VERSION);
-    }
 };
 /// 
-/// Architecture enum defines registered CPU architectures
-/// for program images
+/// Directly by the file section the Load64 section is following
+/// if `cpu_word=0x40` in the File section.
+///   
+pub const Load64 = extern struct {
+    base: u64,
+    size: u64,
+    entry_ptr: u64,
+    sections_offset: u64,
+    sections_count: u64,
+    relocs_offset: u64,
+    relocs_count: u64,
+};
+///
+/// Runtime section is an addition to the LOAD section and skips by `init.lea`
+/// because of unused operating system support.
+/// The "rich" binaries from the userland might contain this extension
 /// 
-pub const Architecture = enum(u16) {
+pub const Runtime32 = extern struct {
+    internal_name_offset: u32,
+    exports_offset: u32,
+    exports_count: u16,
+    imports_offset: u32,
+    imports_count: u16,
+};
+///
+/// Runtime section is an addition to the LOAD section and skips by `init.lea`
+/// because of unused operating system support.
+/// The "rich" binaries from the userland might contain this extension
+/// 
+pub const Runtime64 = extern struct {
+    internal_name_offset: u32,
+    exports_offset: u64,
+    exports_count: u32,
+    imports_offset: u64,
+    imports_count: u32,
+};
+
+pub const CPUArchitecture = enum(u16) {
+    /// None flag tells that image contains untyped/undefined machine code
+    /// or might contain pseudocode.
     None = 0,
     IA32 = 1,
     IA32e = 2,
     ARM = 3,
     ARM64 = 4,
     ARM7 = 5,
-    // ...
-};
-/// 
-/// Same with Microsoft concept, Module definition flags are presented
-/// a program specific which loader must to resolve at the runtime
-/// 
-/// Despite the Microsoft/IBM specific this field is mandatory for Tosk programs,
-/// then reverse engineering process of given images will be little simpler
-///
-pub const Module = enum(u8) {
-    Discarded = 0,
-    Executable = 1,
-    Library = 2,
-    Driver = 3,
-};
-/// 
-/// Registered Operating systems are placed here.
-/// 
-pub const Platform = enum(u16) {
-    /// This is not `NotSpecified` or `Any` word, this word a special flag
-    /// for a decompiling process, that image can't store any runtime/operating system specific 
-    Freestanding = 0,
-    /// Some Tosk executables (e.g. console.roo) are marked as Tosk executables/drivers, not freestanding
-    /// because of `console.roo` image belong to Tosk ~eco~system concept, so loader `_load` section
-    /// already defines image behaviour.
-    ///
-    /// Anyway the `init.lea` are marked as freestanding because it starts the Tosk concept 
-    /// and loads first from EFI boot services/custom boot loader
-    Tosk = 2,
 };
 
-pub const Version = packed struct {
+pub const ModuleType = enum(u8) {
+    /// Module doesn't load in memory,
+    /// loader returns success state but does nothing after module type checking 
+    Discarded = 0,
+    /// Module `entry_ptr` is a necessary field in the LOAD header,
+    /// must be declared and not null.
+    Executable = 1,
+    /// Module `entry_ptr` is an initialization procedure pointer
+    /// which may be missed or ignored by developers, (can be null)
+    Library = 2,
+    /// If module type checking resolves a driver module, the
+    /// `ModuleFlags` must contain a `SIGNED`-bit and a special 
+    /// signature must be embedded  
+    Driver = 3,
+};
+
+pub const Platform = enum(u16) {
+    Freestanding = 0,
+    Tosk = 1,
+};
+
+pub const Version = extern struct {
     major: u16,
     minor: u16,
     revision: u16,
     build: u16,
-    
-    pub fn eql(a: Version, b: Version) bool { 
-        return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b)); 
+
+    pub fn eql(a: Version, b: Version) bool {
+        return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
     }
 };
 
 pub const Abi = enum(u16) {
     Msx64 = 1,
-    SysV = 2, // *
+    SysV = 2,
 };
 
-pub const Tool = extern struct {
-    name_offset: u32, // ASCIIZ string
-    version: Version  // u64
-};
-/// 
-/// Link section defines rich object module information
-/// necessary data of Link section is internal module name
-/// because of symbols resolving at run-time.  
-/// 
-pub const Link = packed struct {
-    name_offset: u32,          // internal module name (uses by module runtime?)
-    platform: Platform,        // Operating System name-tag
-    abi: Abi,                  // Registered ABI tag used in the image
-    platform_version: Version, // operating system version
-    file_version: Version,     // file image version
-    ofmt_version: Version,     // object format version
-    oem_info: u32,             // the OEM/LD last words
-    desc_offset: u32,          // module description (optional)
-    tools_count: u32,          // tool count (optional)
-    tools_offset: u32,         // tool list (default=0)
-    
-    pub const FAT_EXEC: []const u8 = ".LEA";
-    pub const FAT_DLIB: []const u8 = ".SKD";
-    pub const FAT_SLIB: []const u8 = ".SKL";
-    pub const FAT_SDRV: []const u8 = ".ROO";
-    
-    pub const LONG_EXEC: []const u8 = ".LEAF";
-    pub const LONG_DLIB: []const u8 = ".STICK.D";
-    pub const LONG_SLIB: []const u8 = ".STICK.S";
-    pub const LONG_SDRV: []const u8 = ".ROOT";
-};
-
-pub const Section = extern struct {
+pub const Tool  = extern struct {
     name_offset: u32,
-    access: u8, // Bitmask of Access
-    chars: u8,  // Bitmask of Characteristic
-    kind: u8,
-    start_offset: u32,
+    version: Version,
+};
+
+pub const Link = packed struct {
+    platform: Platform,
+    abi: Abi,
+    platform_version: Version,
+    file_version: Version,
+    ofmt_version: Version,
+    oem_info: u32,
+    desc_offset: u32,
+    tools_count: u32,
+    tools_offset: u32,
+};
+
+pub const Section = packed struct {
+    name_offset: u32,
+    access: Access,
+    chars: Characteristics,
+    kind: Kind,
+    /// File section alignment shift 
+    physical_shift: u8, // lb(8) = 3 -> (1 << 3) = 8
+    /// Image section alignment
+    virtual_shift: u8,
     physical_size: u32,
     virtual_size: u32,
-    
-    pub const Access = enum(u8) {
-        Read      = 0b00000001,
-        Write     = 0b00000010,
-        Execute   = 0b00000100,
-    };
-    pub const Kind = enum(u8) {
-        /// Constructor section flag, same with .ctor uses 
-        /// to store initialization prologues or data 
-        Init = 0b00000001,
-        /// Destructor section flag.
-        Deinit = 0b10000000,
-        
-        /// If section contains marked as pure code or data, loader resolves it as loader "wants" 
-        pub fn isPure(kind: u8) bool {
-            const init = @intFromEnum(Kind.Init);
-            const deinit = @intFromEnum(Kind.Deinit);
-            
-            return ((kind & init) == 0) and ((kind & deinit) == 0);
+    pub const Access = packed struct(u8) {
+        read: bool = false,
+        write: bool = false,
+        execute: bool = false,
+        _pad: u5 = 0,
+
+        pub fn full(s: Access) bool {
+            return s.read and s.write and s.execute;
+        }
+        pub fn dangerous(s: Access) bool {
+            // executable+writable is always a red flag
+            return s.execute and s.write;
         }
     };
-    pub const Characteristics = enum(u8) {
-        Discarded = 0b00000010,
-        Shared    = 0b00000100,
-        Paged     = 0b00001000,
-        Cached    = 0b00010000,
-        Resource  = 0b01000000,
+
+    pub const Characteristics = packed struct(u8) {
+        discarded: bool = false,  // loader skips it entirely
+        shared: bool = false,
+        paged: bool = false,
+        cached: bool = false,
+        resource: bool = false,   // .rodata-like
+        _pad: u3 = 0,
+
+        pub fn isDangerous(c: Characteristics, a: Access) bool {
+            // resource sections must never be writable or executable
+            return c.resource and (a.write or a.execute);
+        }
     };
-    pub fn hasFullAcess(s: u8) bool {
-        return (s & (Access.Execute | Access.Read | Access.Write) != 0);
-    }
-    pub fn isInit(s: u8) bool {
-        return (s & Characteristics.Init) != 0;
-    }
-    pub fn isDeinit(s: u8) bool {
-        return (s & Characteristics.DeInit) != 0;
-    }
-    pub fn isUnloadable(s: u8) bool {
-        return (s & Characteristics.Discarded) != 0;
-    }
-    pub fn isDangerous(a: u8, s: u8) bool {
-        // Resource sections never executable anymore.
-        // Writable resources might be a strange changing payload?
-        return ((a & Access.Execute) or (a & Access.Write)) and (s & Characteristics.Resource); 
-    }
+
+    pub const Kind = enum(u8) {
+        Pure = 0,
+        Init = 1,     // constructor code/data
+        Runtime = 2,  // loaded first, before entry
+        Deinit = 3,   // destructor code/data
+        Debug = 4,    // not mapped at runtime
+        Signature = 5,// Must be present in Drivers 
+    };
 };
 
-///   
-/// Export structure defines the whole module API.
-/// Same with the New and Linear executables format 
-/// 
 pub const Export = packed struct {
-    // If address set to null, the exporting procedure/data structure 
-    // calls by ordinal number. Same with MS/IBM project solution... 
-    name_offset: u32,
-    // gate_selector: u16
-    section_pointer: u32 // linear address
-    
+    name_offset: u32, // can be NULL
+    target_ptr: u32,
+    target_kind: ExportType,
 };
 
-test "pointers and sizes" {
-    const testing = @import("std").debug;
-    
-    const load_layout = comptime @sizeOf(Load);
-    
-    testing.print("_load=0x{X}|0x{X}\r\n", .{@sizeOf(Load), load_layout});
-    testing.print("_link=0x{X}\r\n", .{@sizeOf(Link)});
-    testing.print("_section=0x{X}\r\n", .{@sizeOf(Section)});
+pub const ExportType = enum(u8) {
+    Code = 0,
+    Data = 1,
+};
+
+pub const Import = packed struct {
+    module_name_offset: u32,
+    target_name_offset: u32,
+    target_ordinal: u16,
+    target_ptr: u32, // RVA where the resolved address is written???
+    binding: ImportBinding,
+};
+
+pub const ImportBinding = enum(u8) {
+    Lazy = 0,       // resolve on first use (via PLT-like stub)
+    Runtime = 1,    // resolve at load time
+    Weak = 2,       // missing symbol is not an error
+};
+
+test "Size table dec" {
+    // const testing = @import("std").testing;
+    const debug = @import("std").debug;
+    debug.print("\nDecimal sizes\n", .{});
+    debug.print("FILE           {} bytes\r\n", .{@sizeOf(File)});
+    debug.print("LOAD(32|64)    {}|{} bytes\r\n", .{@sizeOf(Load32), @sizeOf(Load64)});
+    debug.print("RUNTIME(32|64) {}|{} bytes\r\n", .{@sizeOf(Runtime32), @sizeOf(Runtime64)});
+    debug.print("SECTION        {} bytes\r\n", .{@sizeOf(Section)});
+    debug.print("EXPORT         {} bytes\r\n", .{@sizeOf(Export)});
+    debug.print("IMPORT         {} bytes\r\n", .{@sizeOf(Import)});
+    // FILE           24 bytes
+    // LOAD(32|64)    28|56 bytes
+    // RUNTIME(32|64) 16|32 bytes
+    // SECTION        32 bytes
+    // EXPORT         16 bytes
+    // IMPORT         16 bytes
+}
+test "Size table hex" {
+    const debug = @import("std").debug;
+    debug.print("\nHexadecimal sizes\n", .{});
+    debug.print("FILE          0x{X} bytes\r\n", .{@sizeOf(File)});
+    debug.print("LOAD(32|64)   0x{X}|0x{X} bytes\r\n", .{@sizeOf(Load32), @sizeOf(Load64)});
+    debug.print("RUNTIME(32|64)0x{X}|0x{X} bytes\r\n", .{@sizeOf(Runtime32), @sizeOf(Runtime64)});
+    debug.print("SECTION       0x{X} bytes\r\n", .{@sizeOf(Section)});
+    debug.print("EXPORT        0x{X} bytes\r\n", .{@sizeOf(Export)});
+    debug.print("IMPORT        0x{X} bytes\r\n", .{@sizeOf(Import)});
 }

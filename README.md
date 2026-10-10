@@ -16,35 +16,36 @@ rich operating system features if it doesn't need at all.
 ## LEAF File Layout
 
 The LEAF OFMT presents two main structures for various user targets.
-The `_load` and `_link` sections. So, the all necessary image information
-which needs to be resolved at the load-time/run-time presented in the `_load` structure
-And all user data needed for reverse engineering or deep analytics presented in the `_link`
+The `LOAD(+FILE)` and `LINK` header sections. So, the all necessary image information
+which needs to be resolved at the load-time/run-time presented in the `LOAD` structure
+And all user data needed for reverse engineering or deep analytics presented in the `LINK`
 section.
 
 ```
-┌───────────────────────┐
-│    [_load] section    │ 0x20 bytes
-├───────────────────────┤
-│    [_link] section    │ 0x30 bytes+symbols
-│       and strings     │ [Not includes in PROCESS{}]
-├───────────────────────┤
-│    [_section] table   │ 
-├───────────────────────┤
-│     [_relocations]    │ [Not includes in PROCESS{}]
-├───────────────────────┤
-│ 00 01 FF 4D D6 90 20 <-- File Section bytes
-│ 33 00 00 03 00 04 FF  │  contains here.
-│ 56 09 DA F0 0B CC 3C  │
-├───────────────────────┤  
-│ 03 00 05 DD 0A 5F 4D <-- File section bytes.
-├───────────────────────┤
-│  .export section      │ Defines by special characteristics
-├───────────────────────┤ and markers inside
-|  .import section      │ 
-├───────────────────────┤
-├───────────────────────┤
-│ ???                   │ Under construction
-└───────────────────────┘
+┌────────────────────────┐
+│ FILE header section  │
+├────────────────────────┤
+│ LOAD header section  │
+├────────────────────────┤
+│ LINK header section  │
+│ and LINK strings     │
+├────────────────────────┤
+│   SECTION TABLE      │
+│ RELOCACTION BLOCKS   │
+├────────────────────────┤
+│ 00 01 FF 4D D6 90 20 │
+│ 33 00 00 03 00 04 FF │
+│ 56 09 DA F0 0B CC 3C │
+├────────────────────────┤
+│ 03 00 05 DD 0A 5F 4D │
+├────────────────────────┤
+│  .export section     │
+├────────────────────────┤
+|  .import section     │
+├────────────────────────┤
+├────────────────────────┤
+│ ???                  │ Under construction
+└────────────────────────┘
 ```
 
 ## What does the loader need?

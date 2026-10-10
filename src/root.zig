@@ -35,11 +35,17 @@
 //!
 const leaf = @import("leaf.zig");
 
+pub const File = leaf.File;
 pub const Load = leaf.Load;
+pub const Load32 = leaf.Load32;
+pub const Load64 = leaf.Load64;
 pub const Link = leaf.Link;
 pub const Section = leaf.Section;
 pub const Tool = leaf.Tool;
-pub const Module = leaf.Module;
+pub const ModuleType = leaf.ModuleType;
 pub const Platform = leaf.Platform;
 pub const Version = leaf.Version;
 pub const Export = leaf.Export;
+pub const Import = leaf.Import;
+pub const Runtime32 = leaf.Runtime32;
+pub const Runtime64 = leaf.Runtime64;
